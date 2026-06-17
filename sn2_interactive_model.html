@@ -3,20 +3,140 @@
 <head>
     <meta charset="utf-8" />
     <title>SN2 3D 互動機構模型</title>
+    <!-- 引入網頁端 Plotly 繪圖核心 -->
     <script src="https://plot.ly"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: 'Microsoft JhengHei', sans-serif; }
         #plotly-element { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
     <div id="plotly-element"></div>
     <script type="text/javascript">
-        // 核心 JS 代碼已優化，移除 iframe 封裝，直接渲染至 body
-        // 此處為優化過的 Plotly 3D 動畫設定與 SN2 反應計算邏輯
-        // (詳見完整程式碼結構，包含 positions 計算與 frames 定義)
-        var layout = { /* ... 隱藏座標軸的簡潔配置 ... */ };
-        // Plotly.newPlot('plotly-element', data, layout)...
+        (function(){
+            var frames_count = 100;
+            var colors = {'C': 'black', 'Nu': 'green', 'L': 'red', 'H': 'gray'};
+            var sizes = {'C': 25, 'Nu': 30, 'L': 32, 'H': 15};
+
+            // 精確的 Trigonal Planar 過渡態 3D 空間幾何公式
+            function get_positions(t) {
+                var c_pos = [0.0, 0.0, 0.0];
+                var nu_pos = [-5.0 + 3.5 * t, 0.0, 0.0];
+                var l_pos = [1.5 + 3.5 * t, 0.0, 0.0];
+                var r = 1.8;
+                var theta_umbrella = (120.0 - 60.0 * t) * Math.PI / 180.0;
+                var x_offset = r * Math.cos(theta_umbrella);
+                var r_planar = Math.sqrt(Math.max(0.0, Math.pow(r, 2) - Math.pow(x_offset, 2)));
+                
+                var h1 = [x_offset, r_planar * Math.cos(0), r_planar * Math.sin(0)];
+                var h2 = [x_offset, r_planar * Math.cos(120 * Math.PI / 180), r_planar * Math.sin(120 * Math.PI / 180)];
+                var h3 = [x_offset, r_planar * Math.cos(240 * Math.PI / 180), r_planar * Math.sin(240 * Math.PI / 180)];
+                return [c_pos, nu_pos, l_pos, [h1, h2, h3]];
+            }
+
+            function make_ch_bonds_data(h_list) {
+                var x = [], y = [], z = [];
+                for (var i = 0; i < h_list.length; i++) {
+                    x.push(0.0, h_list[i][0], null);
+                    y.push(0.0, h_list[i][1], null);
+                    z.push(0.0, h_list[i][2], null);
+                }
+                return [x, y, z];
+            }
+
+            var res = get_positions(0.0);
+            var c_p = res[0], nu_p = res[1], l_p = res[2], h_list = res[3];
+            var ch_data = make_ch_bonds_data(h_list);
+
+            // 定義 6 個嚴格對齊的基礎 3D 圖層
+            var data = [
+                {type: 'scatter3d', x: [c_p[0]], y: [c_p[1]], z: [c_p[2]], mode: 'markers', marker: {color: colors['C'], size: sizes['C']}, name: 'Carbon (碳原子, C)'},
+                {type: 'scatter3d', x: [nu_p[0]], y: [nu_p[1]], z: [nu_p[2]], mode: 'markers', marker: {color: colors['Nu'], size: sizes['Nu']}, name: 'Nucleophile (親核試劑, Nu)'},
+                {type: 'scatter3d', x: [l_p[0]], y: [l_p[1]], z: [l_p[2]], mode: 'markers', marker: {color: colors['L'], size: sizes['L']}, name: 'Leaving Group (離去基, L)'},
+                {type: 'scatter3d', x: h_list.map(h => h[0]), y: h_list.map(h => h[1]), z: h_list.map(h => h[2]), mode: 'markers', marker: {color: colors['H'], size: sizes['H']}, name: 'Hydrogen (氫原子, H)'},
+                {type: 'scatter3d', x: ch_data[0], y: ch_data[1], z: ch_data[2], mode: 'lines', line: {color: 'black', width: 6}, showlegend: false},
+                {type: 'scatter3d', x: [0.0, nu_p[0]], y: [0.0, 0.0], z: [0.0, 0.0], mode: 'lines', line: {color: 'green', width: 6, dash: 'dash'}, showlegend: false},
+                {type: 'scatter3d', x: [0.0, l_p[0]], y: [0.0, 0.0], z: [0.0, 0.0], mode: 'lines', line: {color: 'red', width: 6, dash: 'solid'}, showlegend: false}
+            ];
+
+            var plot_frames = [];
+            var sliders_steps = [];
+
+            for (var i = 0; i < frames_count; i++) {
+                var t = i / (frames_count - 1);
+                var t_warped = t;
+                if (t < 0.40) t_warped = (t / 0.40) * 0.45;
+                else if (t > 0.60) t_warped = 0.55 + ((t - 0.60) / 0.40) * 0.45;
+                else t_warped = 0.45 + ((t - 0.40) / 0.20) * 0.10;
+
+                var frame_res = get_positions(t_warped);
+                var c = frame_res[0], nu = frame_res[1], l = frame_res[2], h_positions = frame_res[3];
+                
+                var nu_dash = 'dash', l_dash = 'solid';
+                var status = '【反應物接近】親核試劑從背面直線進攻';
+                if (t_warped >= 0.45 && t_warped <= 0.55) {
+                    nu_dash = 'dash'; l_dash = 'dash';
+                    status = '【過渡態‧雙虛線特寫】中心呈標準 Trigonal Planar 平面三角形幾何構型';
+                } else if (t_warped > 0.55) {
+                    nu_dash = 'solid'; l_dash = 'dash';
+                    status = '【構型翻轉】離去基離開，氫原子發生對稱瓦爾登翻轉';
+                }
+
+                var cx_res = make_ch_bonds_data(h_positions);
+
+                plot_frames.push({
+                    name: 'frame_' + i,
+                    data: [
+                        {x: [c[0]], y: [c[1]], z: [c[2]]},
+                        {x: [nu[0]], y: [0.0], z: [0.0]},
+                        {x: [l[0]], y: [0.0], z: [0.0]},
+                        {x: h_positions.map(h => h[0]), y: h_positions.map(h => h[1]), z: h_positions.map(h => h[2])},
+                        {x: cx_res[0], y: cx_res[1], z: cx_res[2]},
+                        {x: [0.0, nu[0]], y: [0.0, 0.0], z: [0.0, 0.0], line: {color: 'green', width: 6, dash: nu_dash}},
+                        {x: [0.0, l[0]], y: [0.0, 0.0], z: [0.0, 0.0], line: {color: 'red', width: 6, dash: l_dash}}
+                    ],
+                    layout: {title: '<b>SN2 3D 互動機構模型</b><br>' + status}
+                });
+
+                sliders_steps.push({
+                    label: Math.floor(i / (frames_count - 1) * 100) + '%',
+                    method: 'animate',
+                    args: [['frame_' + i], {frame: {duration: 0, redraw: true}, mode: 'immediate', transition: {duration: 0}}]
+                });
+            }
+
+            var layout = {
+                title: '<b>SN2 3D 互動機構模型</b><br>【反應物接近】親核試劑從背面直線進攻',
+                title_x: 0.5,
+                scene: {
+                    xaxis: {range: [-6, 6], visible: false},
+                    yaxis: {range: [-3, 3], visible: false},
+                    zaxis: {range: [-3, 3], visible: false},
+                    aspectmode: 'manual',
+                    aspectratio: {x: 2, y: 1, z: 1},
+                    camera: {eye: {x: 0.6, y: -2.0, z: 0.6}}
+                },
+                updatemenus: [{
+                    type: 'buttons',
+                    buttons: [
+                        {label: '▶ 播放 (Play)', method: 'animate', args: [null, {frame: {duration: 40, redraw: true}, fromcurrent: True, transition: {duration: 0}}]},
+                        {label: '⏸ 暫停 (Pause)', method: 'animate', args: [[null], {frame: {duration: 0, redraw: false}, mode: 'immediate', transition: {duration: 0}}]}
+                    ],
+                    direction: 'left', pad: {r: 10, t: 87}, x: 0.1, y: 0
+                }],
+                sliders: [{
+                    active: 0, yanchor: 'top', xanchor: 'left',
+                    currentvalue: {font: {size: 14}, prefix: '反應進度: ', visible: true, xanchor: 'right'},
+                    pad: {b: 10, t: 50}, len: 0.9, x: 0.1, y: 0,
+                    steps: sliders_steps
+                }],
+                legend: {x: 0.02, y: 0.98, bgcolor: 'rgba(255,255,255,0.6)', bordercolor: 'Black', borderwidth: 1}
+            };
+
+            Plotly.newPlot('plotly-element', data, layout).then(function() {
+                Plotly.addFrames('plotly-element', plot_frames);
+            });
+        })();
     </script>
 </body>
 </html>
